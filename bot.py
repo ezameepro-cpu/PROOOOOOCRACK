@@ -23,14 +23,15 @@ import asyncio
 import json
 import secrets
 import os
-from datetime import datetime
+import re
+from datetime import datetime, UTC
 from aiohttp import web
 from discord.ext import commands
 
 # ============================================================
 #  CONFIGURA ESTO
 # ============================================================
-BOT_TOKEN      = os.environ["BOT_TOKEN"]
+BOT_TOKEN      = re.sub(r'[\r\n\t\x00-\x1f\x7f]', '', os.environ["BOT_TOKEN"])
 ADMIN_GUILD_ID = int(os.environ["ADMIN_GUILD_ID"])
 ADMIN_CHANNEL  = int(os.environ["ADMIN_CHANNEL_ID"])
 HTTP_PORT      = 8080
@@ -88,7 +89,7 @@ async def addkey(ctx, *, note: str = "sin nombre"):
         "discord_name":    None,
         "awaiting_discord": False,
         "note":            note,
-        "created_at":      datetime.utcnow().isoformat(),
+        "created_at":      datetime.now(UTC).isoformat(),
         "bound_at":        None,
         "discord_set_at":  None,
         "last_used":       None,
@@ -100,7 +101,7 @@ async def addkey(ctx, *, note: str = "sin nombre"):
     embed.add_field(name="🔑 Key",    value=f"```{key}```",  inline=False)
     embed.add_field(name="👤 Para",   value=note,            inline=True)
     embed.add_field(name="📊 Estado", value="Sin atar",      inline=True)
-    embed.set_footer(text=f"Creada: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
+    embed.set_footer(text=f"Creada: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')} UTC")
     await ctx.send(embed=embed)
 
 # ---- !list ----
@@ -251,7 +252,7 @@ async def ban_user(ctx, discord_name: str, *, reason: str = "ban manual por admi
     bl[name_lower] = {
         "original_name": discord_name,
         "reason":       reason,
-        "banned_at":    datetime.utcnow().isoformat(),
+        "banned_at":    datetime.now(UTC).isoformat(),
         "banned_by":    str(ctx.author)
     }
     save_blacklist(bl)
@@ -305,14 +306,14 @@ async def handle_auth(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"status": "invalid"}, status=400)
 
-    key  = str(data.get("key",  "")).strip().upper()
-    hwid = str(data.get("hwid", "")).strip().upper()
+    key  = str(data.get("key",  "") or "").strip().upper()
+    hwid = str(data.get("hwid", "") or "").strip().upper()
 
     if not key or not hwid:
         return web.json_response({"status": "invalid"})
 
     keys = load_keys()
-    now  = datetime.utcnow().isoformat()
+    now  = datetime.now(UTC).isoformat()
 
     if key not in keys:
         print(f"[AUTH] INVALID  key={key}")
@@ -367,16 +368,16 @@ async def handle_auth_discord(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"status": "invalid"}, status=400)
 
-    key          = str(data.get("key",          "")).strip().upper()
-    hwid         = str(data.get("hwid",         "")).strip().upper()
-    discord_name = str(data.get("discord_name", "")).strip()
+    key          = str(data.get("key",          "") or "").strip().upper()
+    hwid         = str(data.get("hwid",         "") or "").strip().upper()
+    discord_name = str(data.get("discord_name", "") or "").strip()
 
     if not key or not hwid or not discord_name:
-        return web.json_response({"status": "invalid"})
+        return web.json_response({"status": "invalid", "msg": "Faltan campos"})
 
     keys = load_keys()
     bl   = load_blacklist()
-    now  = datetime.utcnow().isoformat()
+    now  = datetime.now(UTC).isoformat()
 
     if key not in keys:
         return web.json_response({"status": "invalid"})
@@ -394,10 +395,11 @@ async def handle_auth_discord(request: web.Request) -> web.Response:
             "msg": "Tu nombre de Discord está en la blacklist de EZ4STRAP."
         })
 
-    # Verificar nombre duplicado en otras keys
+    # Verificar nombre duplicado en otras keys (FIX: evitar NoneType)
     duplicate_key = None
     for k, v in keys.items():
-        if k != key and v.get("discord_name", "").lower() == discord_name.lower():
+        existing_name = v.get("discord_name") or ""  # 🆕 FIX AQUÍ
+        if k != key and existing_name.lower() == discord_name.lower():
             duplicate_key = k
             break
 
